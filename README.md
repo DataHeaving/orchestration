@@ -1,8 +1,8 @@
 # Data Heaving - Orchestration
 This repository is part of [Data Heaving project](https://github.com/DataHeaving).
 There are multiple packages in the repository, all of which are related to transforming data [Data Heaving Orchestration API](https://github.com/DataHeaving/orchestration/pipelines):
-- [Pipelines package](pipelines) for transforming arrays into CSV rows (`string`s), and
-- [Scheduler package](scheduler) for transforming `string`s or `Buffer`s into GZIPped `Buffer`s.
+- [Pipelines package](pipelines) to manage definitions of data pipelines: source, transformation(s), and sink, and
+- [Scheduler package](scheduler) to provide very simple way to manage executing the data pipelines.
 
 # Orchestration - The Driving Reason for Data Heaving
 These days, most organizations have identified the need to work with data: to read or write it, to move it around, to transform it, to _heave_ it around the organizational landscape of on-prem and cloud resources.
