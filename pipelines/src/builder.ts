@@ -38,43 +38,46 @@ export class DataPipelineBuilder<TInput, TContext, TDatum> {
     );
   }
 
-  // Please notice! This causes promises to accumulate 1 per datum into the top-level loop!!!
-  // Use with care and only when you know there won't be much data!
-  public asyncTransformEveryDatum<TTransformed>(
-    transformer: (datum: TDatum, context: TContext) => Promise<TTransformed>,
-  ) {
-    return this.complexTransformEveryDatum(() => {
-      return (
-        next: common.DatumStoring<TTransformed>,
-        context,
-        recreateSignal,
-      ) => {
-        let promiseForTransform: Promise<TTransformed> | undefined = undefined;
-        // let seenControlFlow: common.ControlFlow | undefined = undefined;
-        return {
-          transformer: (datum, controlFlow) => {
-            controlFlow?.pause();
-            promiseForTransform = (async () => {
-              try {
-                return await transformer(datum, context);
-              } finally {
-                controlFlow?.resume();
-              }
-            })();
-            // seenControlFlow = controlFlow;
-            // Make top-level code call end immediately so that we can return next promise
-            recreateSignal();
-          },
-          end: async () => {
-            // TODO do we need to await for this here? This will be called only after control flow resumes, and at that point, we are done, as we pause the control flow before invoking promise.
-            const transformed = await promiseForTransform!; // eslint-disable-line @typescript-eslint/no-non-null-assertion
-            next.processor(transformed, undefined); // TODO what if underlying pipeline component will need control flow?
-            next.end();
-          },
-        };
-      };
-    });
-  }
+  // // Please notice! This causes promises to accumulate 1 per datum into the top-level loop!!!
+  // // Use with care and only when you know there won't be much data!
+  // public asyncTransformEveryDatum<TTransformed>(
+  //   transformer: (datum: TDatum, context: TContext) => Promise<TTransformed>,
+  // ) {
+  //   return this.complexTransformEveryDatum(() => {
+  //     return (
+  //       next: common.DatumStoring<TTransformed>,
+  //       context,
+  //       recreateSignal,
+  //     ) => {
+  //       let promiseForTransform: Promise<TTransformed> | undefined = undefined;
+  //       // let seenControlFlow: common.ControlFlow | undefined = undefined;
+  //       return {
+  //         transformer: (datum, controlFlow) => {
+  //           controlFlow?.pause();
+  //           promiseForTransform = (async () => {
+  //             try {
+  //               return await transformer(datum, context);
+  //             } finally {
+  //               controlFlow?.resume();
+  //             }
+  //           })();
+  //           // seenControlFlow = controlFlow;
+  //           // Make top-level code call end immediately so that we can return next promise
+  //           recreateSignal();
+  //         },
+  //         end: async () => {
+  //           // TODO do we need to await for this here? This will be called only after control flow resumes, and at that point, we are done, as we pause the control flow before invoking promise.
+  //           // try {
+  //           const transformed = await promiseForTransform!; // eslint-disable-line @typescript-eslint/no-non-null-assertion
+  //           next.processor(transformed, undefined); // TODO what if underlying pipeline component will need control flow?
+  //           // } finally {
+  //           next.end();
+  //           // }
+  //         },
+  //       };
+  //     };
+  //   });
+  // }
 
   public complexTransformEveryDatum<TTransformed>(
     transformerFactory: common.ComplexDatumTransformerFactory<
