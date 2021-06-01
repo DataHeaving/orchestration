@@ -14,25 +14,21 @@ test("Throwing an error within complex behaves properly", async (t) => {
         .arrayDataSource(startArray)
         .create<typeof startArray, typeof startArray>(() => endArray),
     )
-    .complexTransformEveryDatum<number>(
-      () => (next, context, recreateSignal) => ({
-        transformer: (datum, controlFlow) => {
-          next.processor(datum);
-        },
-        end: async () => {
-          transformerEndCalled = true;
-          next.end();
-          await common.sleep(100);
-          // console.log('THROWING'); // eslint-disable-line
-          throw new Error("Error");
-        },
-      }),
-    )
+    .complexTransformEveryDatum<number>(() => (next) => ({
+      transformer: (datum) => {
+        next.processor(datum);
+      },
+      end: async () => {
+        transformerEndCalled = true;
+        next.end();
+        await common.sleep(100);
+        throw new Error("Error");
+      },
+    }))
     .storeTo(
       testHelpers.arrayDataSink(
         async () => {
-          await common.sleep(100); // return Promise.resolve(sink);
-          // console.log('THROWING'); // eslint-disable-line
+          await common.sleep(100);
           throw new Error("Error");
         },
         () => {
