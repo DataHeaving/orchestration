@@ -14,17 +14,20 @@ test("Throwing an error within complex behaves properly", async (t) => {
         .arrayDataSource(startArray)
         .create<typeof startArray, typeof startArray>(() => endArray),
     )
-    .complexTransformEveryDatum<number>(() => (next) => ({
-      transformer: (datum) => {
-        next.processor(datum);
-      },
-      end: async () => {
-        transformerEndCalled = true;
-        next.end();
-        await common.sleep(100);
-        throw new Error("Error");
-      },
-    }))
+    .transformEveryDatum<number>({
+      transformer: "complex",
+      factory: () => (next) => ({
+        transformer: (datum) => {
+          next.processor(datum);
+        },
+        end: async () => {
+          transformerEndCalled = true;
+          next.end();
+          await common.sleep(100);
+          throw new Error("Error");
+        },
+      }),
+    })
     .storeTo(
       testHelpers.arrayDataSink(
         async () => {

@@ -10,32 +10,99 @@ export class DataPipelineBuilder<TInput, TContext, TDatum> {
     >,
   ) {}
 
-  public simpleTransformEveryDatum<TTransformed>(
-    transformerFactory: common.SimpleDatumTransformerFactory<
+  public transformEveryDatum<TTransformed>(
+    transformerFactory: common.DatumTransformerFactory<
       TContext,
       TDatum,
       TTransformed
     >,
   ) {
-    return new DataPipelineBuilder<TInput, TContext, TTransformed>(
-      (datumStoringFactory) =>
-        this._factory(() => {
-          const processorFactory = datumStoringFactory();
-          return (arg, resetSignal) => {
-            const datumStoring = processorFactory(arg, resetSignal);
-            const { processor, end } = datumStoring.storing;
-            const transformer = transformerFactory(arg);
-            return {
-              storing: {
-                processor: (datum, controlFlow) =>
-                  processor(transformer(datum), controlFlow),
-                end,
-              },
-              promise: datumStoring.promise,
-            };
-          };
-        }),
-    );
+    switch (transformerFactory.transformer) {
+      case "simple": {
+        const factory = transformerFactory.factory;
+        return new DataPipelineBuilder<TInput, TContext, TTransformed>(
+          (datumStoringFactory) =>
+            this._factory(() => {
+              const processorFactory = datumStoringFactory();
+              return (arg, resetSignal) => {
+                const datumStoring = processorFactory(arg, resetSignal);
+                const { processor, end } = datumStoring.storing;
+                const transformer = factory(arg);
+                return {
+                  storing: {
+                    processor: (datum, controlFlow) =>
+                      processor(transformer(datum), controlFlow),
+                    end,
+                  },
+                  promise: datumStoring.promise,
+                };
+              };
+            }),
+        );
+      }
+      case "complex": {
+        const factory = transformerFactory.factory;
+        return new DataPipelineBuilder<TInput, TContext, TTransformed>(
+          (datumStoringFactory) =>
+            this._factory(() => {
+              const datumFactory = factory();
+              const processorFactory = datumStoringFactory();
+              return (arg, resetSignal) => {
+                // TODO Refactor: we don't need nextPart to be recreateable, as this whole scope will be recreated when resetSignal is called!
+                let nextPart:
+                  | common.ComplexDatumTransformer<TDatum>
+                  | undefined = undefined;
+                const endPromises: Array<Promise<unknown>> = [];
+                let endCalled = false;
+                return {
+                  storing: {
+                    processor: (datum, controlFlow) => {
+                      if (!nextPart) {
+                        const { storing, promise } = processorFactory(
+                          arg,
+                          resetSignal,
+                        );
+                        if (promise) {
+                          endPromises.push(promise);
+                        }
+                        nextPart = datumFactory(storing, arg, resetSignal);
+                      }
+                      nextPart.transformer(datum, controlFlow);
+                    },
+                    end: () => {
+                      if (nextPart) {
+                        const maybePromise = nextPart.end();
+                        if (maybePromise instanceof Promise) {
+                          endPromises.push(maybePromise);
+                        }
+                        nextPart = undefined;
+                      }
+                      endCalled = true;
+                    },
+                  },
+                  promise: (async () => {
+                    while (!endCalled) {
+                      await common.sleep(500);
+                    }
+
+                    await Promise.all(endPromises);
+                  })(),
+                };
+              };
+            }),
+        );
+      }
+      default:
+        throw new Error(
+          `Unrecognized transformer factory kind "${
+            (transformerFactory as common.DatumTransformerFactory<
+              TContext,
+              TDatum,
+              TTransformed
+            >).transformer
+          }".`,
+        );
+    }
   }
 
   // // Please notice! This causes promises to accumulate 1 per datum into the top-level loop!!!
@@ -78,64 +145,6 @@ export class DataPipelineBuilder<TInput, TContext, TDatum> {
   //     };
   //   });
   // }
-
-  public complexTransformEveryDatum<TTransformed>(
-    transformerFactory: common.ComplexDatumTransformerFactory<
-      TContext,
-      TDatum,
-      TTransformed
-    >,
-  ) {
-    return new DataPipelineBuilder<TInput, TContext, TTransformed>(
-      (datumStoringFactory) =>
-        this._factory(() => {
-          const datumFactory = transformerFactory();
-          const processorFactory = datumStoringFactory();
-          return (arg, resetSignal) => {
-            // TODO Refactor: we don't need nextPart to be recreateable, as this whole scope will be recreated when resetSignal is called!
-            let nextPart:
-              | common.ComplexDatumTransformer<TDatum>
-              | undefined = undefined;
-            const endPromises: Array<Promise<unknown>> = [];
-            let endCalled = false;
-            return {
-              storing: {
-                processor: (datum, controlFlow) => {
-                  if (!nextPart) {
-                    const { storing, promise } = processorFactory(
-                      arg,
-                      resetSignal,
-                    );
-                    if (promise) {
-                      endPromises.push(promise);
-                    }
-                    nextPart = datumFactory(storing, arg, resetSignal);
-                  }
-                  nextPart.transformer(datum, controlFlow);
-                },
-                end: () => {
-                  if (nextPart) {
-                    const maybePromise = nextPart.end();
-                    if (maybePromise instanceof Promise) {
-                      endPromises.push(maybePromise);
-                    }
-                    nextPart = undefined;
-                  }
-                  endCalled = true;
-                },
-              },
-              promise: (async () => {
-                while (!endCalled) {
-                  await common.sleep(500);
-                }
-
-                await Promise.all(endPromises);
-              })(),
-            };
-          };
-        }),
-    );
-  }
 
   public storeAsIs() {
     return new pipeline.DataPipeline<TInput, TContext, TDatum, TDatum>(

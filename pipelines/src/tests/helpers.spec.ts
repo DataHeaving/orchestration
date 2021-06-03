@@ -14,8 +14,9 @@ test("Splitting sink for array data source works as expected", async (t) => {
         .arrayDataSource(startArray)
         .create<typeof startArray, typeof startArray>(() => endArray),
     )
-    .complexTransformEveryDatum<number>(
-      () => (next, context, recreateSignal) => {
+    .transformEveryDatum<number>({
+      transformer: "complex",
+      factory: () => (next, context, recreateSignal) => {
         ++createCalls;
         return {
           transformer: (datum, controlFlow) => {
@@ -29,7 +30,7 @@ test("Splitting sink for array data source works as expected", async (t) => {
           },
         };
       },
-    )
+    })
     .storeTo(
       testHelpers.arrayDataSink(
         (array) => Promise.resolve(array),
