@@ -1,33 +1,23 @@
 import * as utils from "@data-heaving/common";
 
 // This is virtual interface - no instances implementing this are ever created
-export interface VirtualGlobalMutextJobSpecificEvents<TArg> {
-  jobScheduled: { name: string; arg: TArg; timeToStartInMs: number };
-  jobStarting: { name: string; arg: TArg };
-  jobEnded: { name: string; arg: TArg; durationInMs: number; error?: Error };
+export interface VirtualGlobalMutextJobSpecificEvents {
+  jobScheduled: { name: string; timeToStartInMs: number };
+  jobStarting: { name: string };
+  jobEnded: { name: string; durationInMs: number; error?: Error };
 }
-export type VirtualGlobalMutexSchedulerEvents<
-  TArg
-> = VirtualGlobalMutextJobSpecificEvents<TArg>;
+export type VirtualGlobalMutexSchedulerEvents = VirtualGlobalMutextJobSpecificEvents;
 
-export type GlobalMutexSchedulerEventEmitter<TArg> = utils.EventEmitter<
-  VirtualGlobalMutexSchedulerEvents<TArg>
->;
-export type GlobalMutexSchedulerEventBuilder<TArg> = utils.EventEmitterBuilder<
-  VirtualGlobalMutexSchedulerEvents<TArg>
->;
-export type GlobalMutexSchedulerJobSpecificEventAddition<
-  TArg
-> = utils.EventEmitterRegistrationAddition<
-  VirtualGlobalMutextJobSpecificEvents<TArg>
->;
+export type GlobalMutexSchedulerEventEmitter = utils.EventEmitter<VirtualGlobalMutexSchedulerEvents>;
+export type GlobalMutexSchedulerEventBuilder = utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents>;
+export type GlobalMutexSchedulerJobSpecificEventAddition = utils.EventEmitterRegistrationAddition<VirtualGlobalMutextJobSpecificEvents>;
 
-export const createEventEmitterBuilder = <TArg>() =>
-  new utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents<TArg>>();
+export const createEventEmitterBuilder = () =>
+  new utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents>();
 
-export const consoleLoggingEventEmitterBuilder = <TArg>(
+export const consoleLoggingEventEmitterBuilder = (
   logMessagePrefix?: Parameters<typeof utils.createConsoleLogger>[0],
-  builder?: utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents<TArg>>,
+  builder?: utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents>,
 ) => {
   if (!builder) {
     builder = createEventEmitterBuilder();
