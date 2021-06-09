@@ -1,4 +1,4 @@
-import * as utils from "@data-heaving/common";
+import * as common from "@data-heaving/common";
 
 // This is virtual interface - no instances implementing this are ever created
 export interface VirtualSchedulerEvents {
@@ -7,22 +7,22 @@ export interface VirtualSchedulerEvents {
   jobEnded: { name: string; durationInMs: number; error?: Error };
 }
 
-export type SchedulerEventEmitter = utils.EventEmitter<VirtualSchedulerEvents>;
-export type SchedulerEventBuilder = utils.EventEmitterBuilder<VirtualSchedulerEvents>;
-export type SchedulerJobSpecificEventAddition = utils.EventEmitterRegistrationAddition<VirtualSchedulerEvents>;
+export type SchedulerEventEmitter = common.EventEmitter<VirtualSchedulerEvents>;
+export type SchedulerEventBuilder = common.EventEmitterBuilder<VirtualSchedulerEvents>;
+export type SchedulerJobSpecificEventAddition = common.EventEmitterRegistrationAddition<VirtualSchedulerEvents>;
 
 export const createEventEmitterBuilder = () =>
-  new utils.EventEmitterBuilder<VirtualSchedulerEvents>();
+  new common.EventEmitterBuilder<VirtualSchedulerEvents>();
 
 export const consoleLoggingEventEmitterBuilder = (
-  logMessagePrefix?: Parameters<typeof utils.createConsoleLogger>[0],
-  builder?: utils.EventEmitterBuilder<VirtualSchedulerEvents>,
+  logMessagePrefix?: Parameters<typeof common.createConsoleLogger>[0],
+  builder?: common.EventEmitterBuilder<VirtualSchedulerEvents>,
 ) => {
   if (!builder) {
     builder = createEventEmitterBuilder();
   }
 
-  const logger = utils.createConsoleLogger(logMessagePrefix);
+  const logger = common.createConsoleLogger(logMessagePrefix);
 
   builder.addEventListener("jobScheduled", (arg) =>
     logger(

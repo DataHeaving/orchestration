@@ -1,28 +1,34 @@
-import * as utils from "@data-heaving/common";
+import * as common from "@data-heaving/common";
 import * as events from "./events";
 
 export interface JobInfo {
   timeFromNowToNextInvocation: () => number;
   job: () => Promise<unknown>;
   jobSpecificEvents?:
-    | utils.EventEmitter<events.VirtualSchedulerEvents>
-    | utils.EventEmitterBuilder<events.VirtualSchedulerEvents>;
+    | common.EventEmitter<events.VirtualSchedulerEvents>
+    | common.EventEmitterBuilder<events.VirtualSchedulerEvents>;
 }
 
-type SchedulerReturn = Promise<Array<never>>;
+type SchedulerReturn = Promise<Array<void>>;
+export type SchedulerStopCallback<TJobID extends string> = (
+  jobID: TJobID,
+) => boolean;
 
 export function runScheduler<TJobID extends string>(
   jobs: Record<TJobID, JobInfo>,
   eventBuilder?: events.SchedulerEventBuilder,
+  shouldStop?: SchedulerStopCallback<TJobID>,
 ): SchedulerReturn;
 export function runScheduler<TJobID extends string>(
   jobs: Record<TJobID, (jobID: TJobID) => JobInfo>,
   eventBuilder?: events.SchedulerEventBuilder,
+  shouldStop?: SchedulerStopCallback<TJobID>,
 ): SchedulerReturn;
 export function runScheduler<TJobID extends string>(
   jobIDs: ReadonlyArray<TJobID>,
   jobSetup: (jobID: TJobID, index: number) => JobInfo,
   eventBuilder?: events.SchedulerEventBuilder,
+  shouldStop?: SchedulerStopCallback<TJobID>,
 ): SchedulerReturn;
 
 export function runScheduler<TJobID extends string>(
@@ -33,23 +39,23 @@ export function runScheduler<TJobID extends string>(
   jobSetupOrEventBuilder:
     | ((jobID: TJobID, index: number) => JobInfo)
     | (events.SchedulerEventBuilder | undefined),
-  eventBuilder: events.SchedulerEventBuilder | undefined = undefined,
+  eventBuilderOrshouldStop:
+    | events.SchedulerEventBuilder
+    | SchedulerStopCallback<TJobID>
+    | undefined = undefined,
+  shouldStop?: SchedulerStopCallback<TJobID>,
 ): SchedulerReturn {
   const schedulerEvents =
-    eventBuilder ??
-    (jobSetupOrEventBuilder instanceof utils.EventEmitterBuilder
+    (typeof eventBuilderOrshouldStop === "function"
+      ? undefined
+      : eventBuilderOrshouldStop) ??
+    (jobSetupOrEventBuilder instanceof common.EventEmitterBuilder
       ? jobSetupOrEventBuilder
       : events.createEventEmitterBuilder());
-  // const getScopedEventBuilder = (name: string) => {
-  //   const nameMatcher = {
-  //     name,
-  //   } as const;
-  //   return schedulerEvents.createScopedEventBuilder({
-  //     jobScheduled: nameMatcher,
-  //     jobStarting: nameMatcher,
-  //     jobEnded: nameMatcher,
-  //   });
-  // };
+  const stopCallback =
+    typeof eventBuilderOrshouldStop === "function"
+      ? eventBuilderOrshouldStop
+      : shouldStop ?? (() => false); // By default, never stop
   let jobs: Record<string, JobInfo>;
   if (Array.isArray(jobsOrIDs)) {
     if (typeof jobSetupOrEventBuilder !== "function") {
@@ -85,7 +91,7 @@ export function runScheduler<TJobID extends string>(
       return jobSpecificEvents
         ? emitter.combine(
             // Combine current event emitter with emitter scoped to this specific pipeline
-            (jobSpecificEvents instanceof utils.EventEmitterBuilder
+            (jobSpecificEvents instanceof common.EventEmitterBuilder
               ? jobSpecificEvents.createEventEmitter()
               : jobSpecificEvents
             ).asScopedEventEmitter({
@@ -107,12 +113,11 @@ export function runScheduler<TJobID extends string>(
   const getDuration = (startTime: Date | undefined) =>
     startTime ? new Date().valueOf() - startTime.valueOf() : -1;
   const keepRunningJob = async (
-    name: string,
+    name: TJobID,
     { timeFromNowToNextInvocation, job }: typeof jobs[string],
   ) => {
     let start: Date | undefined = undefined;
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
+    while (!stopCallback(name)) {
       const timeToStartInMs = timeFromNowToNextInvocation();
       eventEmitter.emit("jobScheduled", { name, timeToStartInMs });
       const endedEvent: events.VirtualSchedulerEvents["jobEnded"] = {
@@ -120,7 +125,7 @@ export function runScheduler<TJobID extends string>(
         durationInMs: -1,
       };
       try {
-        await utils.sleep(timeToStartInMs);
+        await common.sleep(timeToStartInMs);
         eventEmitter.emit("jobStarting", { name });
         start = new Date();
         await job();
@@ -133,7 +138,9 @@ export function runScheduler<TJobID extends string>(
     }
   };
   return Promise.all(
-    Object.entries(jobs).map(([name, job]) => keepRunningJob(name, job)),
+    Object.entries(jobs).map(([name, job]) =>
+      keepRunningJob(name as TJobID, job),
+    ),
   );
 }
 
