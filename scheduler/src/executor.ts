@@ -1,95 +1,134 @@
-import * as utils from "@data-heaving/common";
+import * as common from "@data-heaving/common";
 import * as events from "./events";
 
-export interface SchedulerRunOptions<TArg> {
-  jobs: {
-    [name: string]: utils.ItemOrFactory<{
-      timeFromNowToNextInvocation: () => number;
-      job: (arg: TArg) => Promise<unknown>;
-    }>;
-  };
-  eventBuilder?: events.GlobalMutexSchedulerEventBuilder<TArg>;
-  jobSetup: (options: JobArgumentCreationOptions<TArg>) => JobSetup<TArg>;
+export interface JobInfo {
+  timeFromNowToNextInvocation: () => number;
+  job: () => Promise<unknown>;
+  jobSpecificEvents?:
+    | common.EventEmitter<events.VirtualSchedulerEvents>
+    | common.EventEmitterBuilder<events.VirtualSchedulerEvents>;
 }
 
-export interface JobArgumentCreationOptions<TArg> {
-  schedulerEvents: events.GlobalMutexSchedulerJobSpecificEventAddition<TArg>;
-  jobName: string;
-}
+type SchedulerReturn = Promise<Array<void>>;
+export type SchedulerStopCallback<TJobID extends string> = (
+  jobID: TJobID,
+) => boolean;
 
-export interface JobSetup<TArg> {
-  jobArgument: TArg;
-  jobRunner?: (runJob: () => Promise<unknown>) => Promise<unknown>;
-}
+export function runScheduler<TJobID extends string>(
+  jobs: Record<TJobID, JobInfo>,
+  eventBuilder?: events.SchedulerEventBuilder,
+  shouldStop?: SchedulerStopCallback<TJobID>,
+): SchedulerReturn;
+export function runScheduler<TJobID extends string>(
+  jobs: Record<TJobID, (jobID: TJobID) => JobInfo>,
+  eventBuilder?: events.SchedulerEventBuilder,
+  shouldStop?: SchedulerStopCallback<TJobID>,
+): SchedulerReturn;
+export function runScheduler<TJobID extends string>(
+  jobIDs: ReadonlyArray<TJobID>,
+  jobSetup: (jobID: TJobID, index: number) => JobInfo,
+  eventBuilder?: events.SchedulerEventBuilder,
+  shouldStop?: SchedulerStopCallback<TJobID>,
+): SchedulerReturn;
 
-export const runScheduler = <TArg>({
-  jobs,
-  eventBuilder,
-  jobSetup,
-}: SchedulerRunOptions<TArg>) => {
+export function runScheduler<TJobID extends string>(
+  jobsOrIDs:
+    | Record<TJobID, JobInfo>
+    | Record<TJobID, (jobID: TJobID) => JobInfo>
+    | ReadonlyArray<TJobID>,
+  jobSetupOrEventBuilder:
+    | ((jobID: TJobID, index: number) => JobInfo)
+    | (events.SchedulerEventBuilder | undefined),
+  eventBuilderOrshouldStop:
+    | events.SchedulerEventBuilder
+    | SchedulerStopCallback<TJobID>
+    | undefined = undefined,
+  shouldStop?: SchedulerStopCallback<TJobID>,
+): SchedulerReturn {
+  const schedulerEvents =
+    (typeof eventBuilderOrshouldStop === "function"
+      ? undefined
+      : eventBuilderOrshouldStop) ??
+    (jobSetupOrEventBuilder instanceof common.EventEmitterBuilder
+      ? jobSetupOrEventBuilder
+      : events.createEventEmitterBuilder());
+  const stopCallback =
+    typeof eventBuilderOrshouldStop === "function"
+      ? eventBuilderOrshouldStop
+      : shouldStop ?? (() => false); // By default, never stop
+  let jobs: Record<string, JobInfo>;
+  if (Array.isArray(jobsOrIDs)) {
+    if (typeof jobSetupOrEventBuilder !== "function") {
+      throw new Error(
+        "When giving array as first argument, second argument must be function.",
+      );
+    }
+    jobs = jobsOrIDs.reduce<typeof jobs>((curJobs, jobID, idx) => {
+      if (jobID in curJobs) {
+        throw new Error(`Duplicate job ID ${jobID}`);
+      }
+      curJobs[jobID] = jobSetupOrEventBuilder(
+        // getScopedEventBuilder(jobID),
+        jobID,
+        idx,
+      );
+      return curJobs;
+    }, {});
+  } else {
+    jobs = Object.entries<JobInfo | ((jobID: TJobID) => JobInfo)>(
+      jobsOrIDs,
+    ).reduce<typeof jobs>((curJobs, [jobID, jobOrFactory]) => {
+      curJobs[jobID] =
+        typeof jobOrFactory === "function"
+          ? jobOrFactory(jobID as TJobID)
+          : jobOrFactory;
+      return curJobs;
+    }, {});
+  }
+
+  const eventEmitter = Object.entries(jobs).reduce(
+    (emitter, [jobID, { jobSpecificEvents }]) => {
+      return jobSpecificEvents
+        ? emitter.combine(
+            // Combine current event emitter with emitter scoped to this specific pipeline
+            (jobSpecificEvents instanceof common.EventEmitterBuilder
+              ? jobSpecificEvents.createEventEmitter()
+              : jobSpecificEvents
+            ).asScopedEventEmitter({
+              jobScheduled: {
+                name: jobID,
+              },
+              jobStarting: {
+                name: jobID,
+              },
+              jobEnded: {
+                name: jobID,
+              },
+            }),
+          )
+        : emitter;
+    },
+    schedulerEvents.createEventEmitter(),
+  );
   const getDuration = (startTime: Date | undefined) =>
     startTime ? new Date().valueOf() - startTime.valueOf() : -1;
-
-  const schedulerEvents = eventBuilder || events.createEventEmitterBuilder();
-  const jobKeys = Object.keys(jobs);
-  const allArgs = jobKeys.reduce<Record<string, JobSetup<TArg>>>(
-    (argsDictionary, jobName) => {
-      const nameMatcher = {
-        name: jobName,
-      } as const;
-      argsDictionary[jobName] = jobSetup({
-        jobName,
-        schedulerEvents: schedulerEvents.createScopedEventBuilder({
-          jobScheduled: nameMatcher,
-          jobStarting: nameMatcher,
-          jobEnded: nameMatcher,
-        }),
-      });
-      return argsDictionary;
-    },
-    {},
-  );
-
-  const eventEmitter = schedulerEvents.createEventEmitter();
-  const jobsDictionary = Object.fromEntries(
-    jobKeys.map((jobName) => {
-      const jobOrFactory = jobs[jobName];
-      return [
-        jobName,
-        typeof jobOrFactory === "function" ? jobOrFactory() : jobOrFactory,
-      ] as const;
-    }),
-  );
-
   const keepRunningJob = async (
-    name: string,
-    { timeFromNowToNextInvocation, job }: typeof jobsDictionary[string],
+    name: TJobID,
+    { timeFromNowToNextInvocation, job }: typeof jobs[string],
   ) => {
-    // const api = mutexInfo?.mutexAPIFactory(name);
     let start: Date | undefined = undefined;
-    const { jobArgument: arg, jobRunner } = allArgs[name];
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
+    while (!stopCallback(name)) {
       const timeToStartInMs = timeFromNowToNextInvocation();
-      eventEmitter.emit("jobScheduled", { name, arg, timeToStartInMs });
-      const endedEvent: events.VirtualGlobalMutexSchedulerEvents<TArg>["jobEnded"] = {
+      eventEmitter.emit("jobScheduled", { name, timeToStartInMs });
+      const endedEvent: events.VirtualSchedulerEvents["jobEnded"] = {
         name,
-        arg,
         durationInMs: -1,
       };
       try {
-        await utils.sleep(timeToStartInMs);
-        eventEmitter.emit("jobStarting", { name, arg });
+        await common.sleep(timeToStartInMs);
+        eventEmitter.emit("jobStarting", { name });
         start = new Date();
-        await (jobRunner ? jobRunner(() => job(arg)) : job(arg));
-        //  mutex.executeWithMutexAndHeartBeat({
-        //     api,
-        //     usage: () => job(arg),
-        //     heartBeatUploadPeriod: mutexInfo?.heartBeatUploadPeriod || 60000, // Upload heart beat every 1min by default
-        //     heartBeatStaleTime: mutexInfo?.heartBeatStaleTime || 120000, // Stale time is 2min by default
-        //     eventEmitter,
-        //   })
-        // : job(arg));
+        await job();
       } catch (e) {
         endedEvent.error = e as Error;
       } finally {
@@ -99,8 +138,21 @@ export const runScheduler = <TArg>({
     }
   };
   return Promise.all(
-    Object.entries(jobsDictionary).map(([name, job]) =>
-      keepRunningJob(name, job),
+    Object.entries(jobs).map(([name, job]) =>
+      keepRunningJob(name as TJobID, job),
     ),
   );
-};
+}
+
+// TS is in process of revamping its array methods, see:
+// https://github.com/microsoft/TypeScript/issues/17002
+// https://github.com/microsoft/TypeScript/pull/41849
+// https://github.com/microsoft/TypeScript/issues/36554
+// Meanwhile, we need to do with these hacks (code from comment in first link)
+declare global {
+  interface ArrayConstructor {
+    isArray(
+      arg: ReadonlyArray<unknown> | unknown,
+    ): arg is ReadonlyArray<unknown>;
+  }
+}
