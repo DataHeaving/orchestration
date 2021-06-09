@@ -1,39 +1,28 @@
-import * as utils from "@data-heaving/common";
+import * as common from "@data-heaving/common";
 
 // This is virtual interface - no instances implementing this are ever created
-export interface VirtualGlobalMutextJobSpecificEvents<TArg> {
-  jobScheduled: { name: string; arg: TArg; timeToStartInMs: number };
-  jobStarting: { name: string; arg: TArg };
-  jobEnded: { name: string; arg: TArg; durationInMs: number; error?: Error };
+export interface VirtualSchedulerEvents {
+  jobScheduled: { name: string; timeToStartInMs: number };
+  jobStarting: { name: string };
+  jobEnded: { name: string; durationInMs: number; error?: Error };
 }
-export type VirtualGlobalMutexSchedulerEvents<
-  TArg
-> = VirtualGlobalMutextJobSpecificEvents<TArg>;
 
-export type GlobalMutexSchedulerEventEmitter<TArg> = utils.EventEmitter<
-  VirtualGlobalMutexSchedulerEvents<TArg>
->;
-export type GlobalMutexSchedulerEventBuilder<TArg> = utils.EventEmitterBuilder<
-  VirtualGlobalMutexSchedulerEvents<TArg>
->;
-export type GlobalMutexSchedulerJobSpecificEventAddition<
-  TArg
-> = utils.EventEmitterRegistrationAddition<
-  VirtualGlobalMutextJobSpecificEvents<TArg>
->;
+export type SchedulerEventEmitter = common.EventEmitter<VirtualSchedulerEvents>;
+export type SchedulerEventBuilder = common.EventEmitterBuilder<VirtualSchedulerEvents>;
+export type SchedulerJobSpecificEventAddition = common.EventEmitterRegistrationAddition<VirtualSchedulerEvents>;
 
-export const createEventEmitterBuilder = <TArg>() =>
-  new utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents<TArg>>();
+export const createEventEmitterBuilder = () =>
+  new common.EventEmitterBuilder<VirtualSchedulerEvents>();
 
-export const consoleLoggingEventEmitterBuilder = <TArg>(
-  logMessagePrefix?: Parameters<typeof utils.createConsoleLogger>[0],
-  builder?: utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents<TArg>>,
+export const consoleLoggingEventEmitterBuilder = (
+  logMessagePrefix?: Parameters<typeof common.createConsoleLogger>[0],
+  builder?: common.EventEmitterBuilder<VirtualSchedulerEvents>,
 ) => {
   if (!builder) {
     builder = createEventEmitterBuilder();
   }
 
-  const logger = utils.createConsoleLogger(logMessagePrefix);
+  const logger = common.createConsoleLogger(logMessagePrefix);
 
   builder.addEventListener("jobScheduled", (arg) =>
     logger(
