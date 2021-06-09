@@ -1,23 +1,22 @@
 import * as utils from "@data-heaving/common";
 
 // This is virtual interface - no instances implementing this are ever created
-export interface VirtualGlobalMutextJobSpecificEvents {
+export interface VirtualSchedulerEvents {
   jobScheduled: { name: string; timeToStartInMs: number };
   jobStarting: { name: string };
   jobEnded: { name: string; durationInMs: number; error?: Error };
 }
-export type VirtualGlobalMutexSchedulerEvents = VirtualGlobalMutextJobSpecificEvents;
 
-export type GlobalMutexSchedulerEventEmitter = utils.EventEmitter<VirtualGlobalMutexSchedulerEvents>;
-export type GlobalMutexSchedulerEventBuilder = utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents>;
-export type GlobalMutexSchedulerJobSpecificEventAddition = utils.EventEmitterRegistrationAddition<VirtualGlobalMutextJobSpecificEvents>;
+export type SchedulerEventEmitter = utils.EventEmitter<VirtualSchedulerEvents>;
+export type SchedulerEventBuilder = utils.EventEmitterBuilder<VirtualSchedulerEvents>;
+export type SchedulerJobSpecificEventAddition = utils.EventEmitterRegistrationAddition<VirtualSchedulerEvents>;
 
 export const createEventEmitterBuilder = () =>
-  new utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents>();
+  new utils.EventEmitterBuilder<VirtualSchedulerEvents>();
 
 export const consoleLoggingEventEmitterBuilder = (
   logMessagePrefix?: Parameters<typeof utils.createConsoleLogger>[0],
-  builder?: utils.EventEmitterBuilder<VirtualGlobalMutexSchedulerEvents>,
+  builder?: utils.EventEmitterBuilder<VirtualSchedulerEvents>,
 ) => {
   if (!builder) {
     builder = createEventEmitterBuilder();

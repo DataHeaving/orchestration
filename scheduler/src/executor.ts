@@ -4,69 +4,52 @@ import * as events from "./events";
 export interface JobInfo {
   timeFromNowToNextInvocation: () => number;
   job: () => Promise<unknown>;
+  jobSpecificEvents?:
+    | utils.EventEmitter<events.VirtualSchedulerEvents>
+    | utils.EventEmitterBuilder<events.VirtualSchedulerEvents>;
 }
 
 type SchedulerReturn = Promise<Array<never>>;
 
 export function runScheduler<TJobID extends string>(
   jobs: Record<TJobID, JobInfo>,
-  eventBuilder?: events.GlobalMutexSchedulerEventBuilder,
+  eventBuilder?: events.SchedulerEventBuilder,
 ): SchedulerReturn;
 export function runScheduler<TJobID extends string>(
-  jobs: Record<
-    TJobID,
-    (
-      events: events.GlobalMutexSchedulerJobSpecificEventAddition,
-      jobID: TJobID,
-    ) => JobInfo
-  >,
-  eventBuilder?: events.GlobalMutexSchedulerEventBuilder,
+  jobs: Record<TJobID, (jobID: TJobID) => JobInfo>,
+  eventBuilder?: events.SchedulerEventBuilder,
 ): SchedulerReturn;
 export function runScheduler<TJobID extends string>(
   jobIDs: ReadonlyArray<TJobID>,
-  jobSetup: (
-    events: events.GlobalMutexSchedulerJobSpecificEventAddition,
-    jobID: TJobID,
-    index: number,
-  ) => JobInfo,
-  eventBuilder?: events.GlobalMutexSchedulerEventBuilder,
+  jobSetup: (jobID: TJobID, index: number) => JobInfo,
+  eventBuilder?: events.SchedulerEventBuilder,
 ): SchedulerReturn;
 
 export function runScheduler<TJobID extends string>(
   jobsOrIDs:
     | Record<TJobID, JobInfo>
-    | Record<
-        TJobID,
-        (
-          events: events.GlobalMutexSchedulerJobSpecificEventAddition,
-          jobID: TJobID,
-        ) => JobInfo
-      >
+    | Record<TJobID, (jobID: TJobID) => JobInfo>
     | ReadonlyArray<TJobID>,
   jobSetupOrEventBuilder:
-    | ((
-        events: events.GlobalMutexSchedulerJobSpecificEventAddition,
-        jobID: TJobID,
-        index: number,
-      ) => JobInfo)
-    | (events.GlobalMutexSchedulerEventBuilder | undefined),
-  eventBuilder: events.GlobalMutexSchedulerEventBuilder | undefined = undefined,
+    | ((jobID: TJobID, index: number) => JobInfo)
+    | (events.SchedulerEventBuilder | undefined),
+  eventBuilder: events.SchedulerEventBuilder | undefined = undefined,
 ): SchedulerReturn {
   const schedulerEvents =
     eventBuilder ??
     (jobSetupOrEventBuilder instanceof utils.EventEmitterBuilder
       ? jobSetupOrEventBuilder
       : events.createEventEmitterBuilder());
-  const getScopedEventBuilder = (name: string) => {
-    const nameMatcher = {
-      name,
-    } as const;
-    return schedulerEvents.createScopedEventBuilder({
-      jobScheduled: nameMatcher,
-      jobStarting: nameMatcher,
-      jobEnded: nameMatcher,
-    });
-  };
+  // const getScopedEventBuilder = (name: string) => {
+  //   const nameMatcher = {
+  //     name,
+  //   } as const;
+  //   return schedulerEvents.createScopedEventBuilder({
+  //     jobScheduled: nameMatcher,
+  //     jobStarting: nameMatcher,
+  //     jobEnded: nameMatcher,
+  //   });
+  // };
   let jobs: Record<string, JobInfo>;
   if (Array.isArray(jobsOrIDs)) {
     if (typeof jobSetupOrEventBuilder !== "function") {
@@ -79,29 +62,48 @@ export function runScheduler<TJobID extends string>(
         throw new Error(`Duplicate job ID ${jobID}`);
       }
       curJobs[jobID] = jobSetupOrEventBuilder(
-        getScopedEventBuilder(jobID),
+        // getScopedEventBuilder(jobID),
         jobID,
         idx,
       );
       return curJobs;
     }, {});
   } else {
-    jobs = Object.entries<
-      | JobInfo
-      | ((
-          events: events.GlobalMutexSchedulerJobSpecificEventAddition,
-          jobID: TJobID,
-        ) => JobInfo)
-    >(jobsOrIDs).reduce<typeof jobs>((curJobs, [jobID, jobOrFactory]) => {
+    jobs = Object.entries<JobInfo | ((jobID: TJobID) => JobInfo)>(
+      jobsOrIDs,
+    ).reduce<typeof jobs>((curJobs, [jobID, jobOrFactory]) => {
       curJobs[jobID] =
         typeof jobOrFactory === "function"
-          ? jobOrFactory(getScopedEventBuilder(jobID), jobID as TJobID)
+          ? jobOrFactory(jobID as TJobID)
           : jobOrFactory;
       return curJobs;
     }, {});
   }
 
-  const eventEmitter = schedulerEvents.createEventEmitter();
+  const eventEmitter = Object.entries(jobs).reduce(
+    (emitter, [jobID, { jobSpecificEvents }]) => {
+      return jobSpecificEvents
+        ? emitter.combine(
+            // Combine current event emitter with emitter scoped to this specific pipeline
+            (jobSpecificEvents instanceof utils.EventEmitterBuilder
+              ? jobSpecificEvents.createEventEmitter()
+              : jobSpecificEvents
+            ).asScopedEventEmitter({
+              jobScheduled: {
+                name: jobID,
+              },
+              jobStarting: {
+                name: jobID,
+              },
+              jobEnded: {
+                name: jobID,
+              },
+            }),
+          )
+        : emitter;
+    },
+    schedulerEvents.createEventEmitter(),
+  );
   const getDuration = (startTime: Date | undefined) =>
     startTime ? new Date().valueOf() - startTime.valueOf() : -1;
   const keepRunningJob = async (
@@ -113,7 +115,7 @@ export function runScheduler<TJobID extends string>(
     while (true) {
       const timeToStartInMs = timeFromNowToNextInvocation();
       eventEmitter.emit("jobScheduled", { name, timeToStartInMs });
-      const endedEvent: events.VirtualGlobalMutexSchedulerEvents["jobEnded"] = {
+      const endedEvent: events.VirtualSchedulerEvents["jobEnded"] = {
         name,
         durationInMs: -1,
       };
