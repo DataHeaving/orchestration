@@ -2,28 +2,25 @@ import * as common from "@data-heaving/common";
 import * as events from "./events";
 
 export interface JobInfo<TResult> {
-  timeFromNowToNextInvocation: (prevResult: TResult | undefined) => number;
+  timeFromNowToNextInvocation: (
+    prevResult: TResult | undefined,
+  ) => number | undefined;
   job: () => Promise<TResult>;
   jobSpecificEvents?:
     | common.EventEmitter<events.VirtualSchedulerEvents>
     | common.EventEmitterBuilder<events.VirtualSchedulerEvents>;
 }
 
-type SchedulerReturn = Promise<Array<void>>;
-export type SchedulerStopCallback<TJobID extends string> = (
-  jobID: TJobID,
-) => boolean;
+export type SchedulerReturn = Promise<Array<unknown>>;
 
 export function runScheduler<TJobID extends string>(
   jobs: Record<TJobID, common.ItemOrFactory<JobInfo<unknown>, [TJobID]>>,
   eventBuilder?: events.SchedulerEventBuilder,
-  shouldStop?: SchedulerStopCallback<TJobID>,
 ): SchedulerReturn;
 export function runScheduler<TJobID extends string>(
   jobIDs: ReadonlyArray<TJobID>,
   jobSetup: (jobID: TJobID, index: number) => JobInfo<unknown>,
   eventBuilder?: events.SchedulerEventBuilder,
-  shouldStop?: SchedulerStopCallback<TJobID>,
 ): SchedulerReturn;
 
 export function runScheduler<TJobID extends string>(
@@ -35,9 +32,7 @@ export function runScheduler<TJobID extends string>(
     | (events.SchedulerEventBuilder | undefined),
   eventBuilderOrshouldStop:
     | events.SchedulerEventBuilder
-    | SchedulerStopCallback<TJobID>
     | undefined = undefined,
-  shouldStop?: SchedulerStopCallback<TJobID>,
 ): SchedulerReturn {
   const schedulerEvents =
     (typeof eventBuilderOrshouldStop === "function"
@@ -46,10 +41,6 @@ export function runScheduler<TJobID extends string>(
     (jobSetupOrEventBuilder instanceof common.EventEmitterBuilder
       ? jobSetupOrEventBuilder
       : events.createEventEmitterBuilder());
-  const stopCallback =
-    typeof eventBuilderOrshouldStop === "function"
-      ? eventBuilderOrshouldStop
-      : shouldStop ?? (() => false); // By default, never stop
   let jobs: Record<string, JobInfo<unknown>>;
   if (Array.isArray(jobsOrIDs)) {
     if (typeof jobSetupOrEventBuilder !== "function") {
@@ -109,25 +100,30 @@ export function runScheduler<TJobID extends string>(
   ) => {
     let start: Date | undefined = undefined;
     let prevResult = undefined;
-    while (!stopCallback(name)) {
-      const timeToStartInMs = timeFromNowToNextInvocation(prevResult);
-      eventEmitter.emit("jobScheduled", { name, timeToStartInMs });
-      const endedEvent: events.VirtualSchedulerEvents["jobEnded"] = {
-        name,
-        durationInMs: -1,
-      };
-      try {
-        await common.sleep(timeToStartInMs);
-        eventEmitter.emit("jobStarting", { name });
-        start = new Date();
-        prevResult = await job();
-      } catch (e) {
-        endedEvent.error = e as Error;
-      } finally {
-        endedEvent.durationInMs = getDuration(start);
-        eventEmitter.emit("jobEnded", endedEvent);
+    let timeToStartInMs: number | undefined;
+    do {
+      timeToStartInMs = timeFromNowToNextInvocation(prevResult);
+      if (timeToStartInMs !== undefined && !isNaN(timeToStartInMs)) {
+        eventEmitter.emit("jobScheduled", { name, timeToStartInMs });
+        const endedEvent: events.VirtualSchedulerEvents["jobEnded"] = {
+          name,
+          durationInMs: -1,
+        };
+        try {
+          await common.sleep(timeToStartInMs);
+          eventEmitter.emit("jobStarting", { name });
+          start = new Date();
+          prevResult = await job();
+        } catch (e) {
+          prevResult = undefined;
+          endedEvent.error = e as Error;
+        } finally {
+          endedEvent.durationInMs = getDuration(start);
+          eventEmitter.emit("jobEnded", endedEvent);
+        }
       }
-    }
+    } while (timeToStartInMs !== undefined && !isNaN(timeToStartInMs));
+    return prevResult;
   };
   return Promise.all(
     Object.entries(jobs).map(([name, job]) =>
