@@ -7,29 +7,24 @@ test("Job-specific event invoking works", async (t) => {
   const globalEvents = createEventsTrackerObject();
   const job1Events = createEventsTrackerObject();
   const job2Events = createEventsTrackerObject();
-  let iterationCounter = 2;
   await spec.runScheduler(
     {
       job1: {
         job: () => common.sleep(100),
-        timeFromNowToNextInvocation: () => 0,
+        timeFromNowToNextInvocation: timeFromNowToNextInvocation(1, 0), // Return value of 0 for 1 time, then undefined
         jobSpecificEvents: createJobSpecificEventBuilderForTrackerObject(
           job1Events,
         ),
       },
       job2: {
         job: () => common.sleep(100),
-        timeFromNowToNextInvocation: () => 0,
+        timeFromNowToNextInvocation: timeFromNowToNextInvocation(1, 0), // Return value of 0 for 1 time, then undefined
         jobSpecificEvents: createJobSpecificEventBuilderForTrackerObject(
           job2Events,
         ),
       },
     },
     createJobSpecificEventBuilderForTrackerObject(globalEvents),
-    () => {
-      // Return true (to stop running) once counter goes to zero
-      return --iterationCounter < 0;
-    },
   );
 
   t.deepEqual(
@@ -61,6 +56,28 @@ test("Job-specific event invoking works", async (t) => {
   );
 });
 
+test("After error, previous value is undefined", async (t) => {
+  let counter = 0;
+  const timeToNextRun = timeFromNowToNextInvocation(4, 0);
+  const seenResults: Array<unknown> = [];
+  await spec.runScheduler({
+    job: {
+      job: () => {
+        ++counter;
+        if (counter === 3) {
+          throw new Error("Dummy");
+        }
+        return Promise.resolve(counter);
+      },
+      timeFromNowToNextInvocation: (val) => {
+        seenResults.push(val);
+        return timeToNextRun();
+      },
+    },
+  });
+  t.deepEqual(seenResults, [undefined, 1, 2, undefined, 4]);
+});
+
 function createEventsTrackerObject(): {
   [P in keyof events.VirtualSchedulerEvents]: number;
 } {
@@ -83,3 +100,6 @@ const createJobSpecificEventBuilderForTrackerObject = (
   }
   return retVal;
 };
+
+const timeFromNowToNextInvocation = (iterations: number, delay: number) => () =>
+  --iterations < 0 ? undefined : delay;
