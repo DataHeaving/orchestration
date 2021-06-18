@@ -1,4 +1,6 @@
 # Data Heaving - Pipelines Orchestration
+[![Code Coverage](https://codecov.io/gh/DataHeaving/orchestration/branch/develop/graph/badge.svg?flag=pipelines)](https://codecov.io/gh/DataHeaving/orchestration)
+
 This folder contains source code for `@data-heaving/orchestration` NPM package.
 The exported entities include:
 - `DataPipelineBuilder` class to incrementally and declaratively build your data pipelines,

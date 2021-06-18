@@ -1,4 +1,6 @@
 # Data Heaving - Orchestration
+[![Code Coverage](https://codecov.io/gh/DataHeaving/orchestration/branch/develop/graph/badge.svg)](https://codecov.io/gh/DataHeaving/orchestration)
+
 This repository is part of [Data Heaving project](https://github.com/DataHeaving).
 There are multiple packages in the repository, all of which are related to transforming data [Data Heaving Orchestration API](https://github.com/DataHeaving/orchestration/pipelines):
 - [Pipelines package](pipelines) to manage definitions of data pipelines: source, transformation(s), and sink, and
