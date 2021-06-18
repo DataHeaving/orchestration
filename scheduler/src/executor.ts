@@ -19,7 +19,7 @@ export function runScheduler<TJobID extends string>(
 ): SchedulerReturn;
 export function runScheduler<TJobID extends string>(
   jobIDs: ReadonlyArray<TJobID>,
-  jobSetup: (jobID: TJobID, index: number) => JobInfo<unknown>,
+  jobSetup: common.ItemOrFactory<JobInfo<unknown>, [TJobID, number]>,
   eventBuilder?: events.SchedulerEventBuilder,
 ): SchedulerReturn;
 
@@ -28,7 +28,7 @@ export function runScheduler<TJobID extends string>(
     | Record<TJobID, common.ItemOrFactory<JobInfo<unknown>, [TJobID]>>
     | ReadonlyArray<TJobID>,
   jobSetupOrEventBuilder:
-    | ((jobID: TJobID, index: number) => JobInfo<unknown>)
+    | common.ItemOrFactory<JobInfo<unknown>, [TJobID, number]>
     | (events.SchedulerEventBuilder | undefined),
   eventBuilderOrshouldStop:
     | events.SchedulerEventBuilder
@@ -43,20 +43,26 @@ export function runScheduler<TJobID extends string>(
       : events.createEventEmitterBuilder());
   let jobs: Record<string, JobInfo<unknown>>;
   if (Array.isArray(jobsOrIDs)) {
-    if (typeof jobSetupOrEventBuilder !== "function") {
-      throw new Error(
-        "When giving array as first argument, second argument must be function.",
+    if (
+      jobSetupOrEventBuilder instanceof common.EventEmitterBuilder ||
+      jobSetupOrEventBuilder === undefined
+    ) {
+      throw new InvalidParametersError(
+        "When giving array as first argument, second argument must be function or job specification.",
       );
     }
     jobs = jobsOrIDs.reduce<typeof jobs>((curJobs, jobID, idx) => {
       if (jobID in curJobs) {
-        throw new Error(`Duplicate job ID ${jobID}`);
+        throw new DuplicateJobIDError(jobID);
       }
-      curJobs[jobID] = jobSetupOrEventBuilder(
-        // getScopedEventBuilder(jobID),
-        jobID,
-        idx,
-      );
+      curJobs[jobID] =
+        typeof jobSetupOrEventBuilder === "function"
+          ? jobSetupOrEventBuilder(
+              // getScopedEventBuilder(jobID),
+              jobID,
+              idx,
+            )
+          : jobSetupOrEventBuilder;
       return curJobs;
     }, {});
   } else {
@@ -79,13 +85,13 @@ export function runScheduler<TJobID extends string>(
             // Combine current event emitter with emitter scoped to this specific pipeline
             common.scopeEvents(jobSpecificEvents, {
               jobScheduled: {
-                name: jobID,
+                jobID: jobID,
               },
               jobStarting: {
-                name: jobID,
+                jobID: jobID,
               },
               jobEnded: {
-                name: jobID,
+                jobID: jobID,
               },
             }),
           )
@@ -104,14 +110,14 @@ export function runScheduler<TJobID extends string>(
     do {
       timeToStartInMs = timeFromNowToNextInvocation(prevResult);
       if (timeToStartInMs !== undefined && !isNaN(timeToStartInMs)) {
-        eventEmitter.emit("jobScheduled", { name, timeToStartInMs });
+        eventEmitter.emit("jobScheduled", { jobID: name, timeToStartInMs });
         const endedEvent: events.VirtualSchedulerEvents["jobEnded"] = {
-          name,
+          jobID: name,
           durationInMs: -1,
         };
         try {
           await common.sleep(timeToStartInMs);
-          eventEmitter.emit("jobStarting", { name });
+          eventEmitter.emit("jobStarting", { jobID: name });
           start = new Date();
           prevResult = await job();
         } catch (e) {
@@ -144,3 +150,11 @@ declare global {
     ): arg is ReadonlyArray<unknown>;
   }
 }
+
+export class DuplicateJobIDError extends Error {
+  public constructor(public readonly jobID: string) {
+    super(`Duplicate job ID "${jobID}".`);
+  }
+}
+
+export class InvalidParametersError extends Error {}

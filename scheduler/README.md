@@ -1,4 +1,6 @@
 # Data Heaving - Pipelines Scheduling
+[![Code Coverage](https://codecov.io/gh/DataHeaving/orchestration/branch/develop/graph/badge.svg?flag=scheduler)](https://codecov.io/gh/DataHeaving/orchestration)
+
 This folder contains source code for `@data-heaving/scheduling` NPM package.
 The exported entities include:
 - `runScheduler` method to run the scheduler, and
