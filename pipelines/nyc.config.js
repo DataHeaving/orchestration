@@ -6,7 +6,7 @@ module.exports = {
   ],
   "exclude": [
     "**/*.spec.[jt]s",
-    "dist/**/*.d.ts"
+    "dist/**/*.d.ts",
   ],
   "reporter": [
     "text",

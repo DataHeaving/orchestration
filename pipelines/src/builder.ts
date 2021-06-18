@@ -1,5 +1,4 @@
 import * as common from "@data-heaving/common";
-import * as pipeline from "./pipeline";
 
 export class DataPipelineBuilder<TInput, TContext, TDatum> {
   public constructor(
@@ -93,14 +92,12 @@ export class DataPipelineBuilder<TInput, TContext, TDatum> {
         );
       }
       default:
-        throw new Error(
-          `Unrecognized transformer factory kind "${
-            (transformerFactory as common.DatumTransformerFactory<
-              TContext,
-              TDatum,
-              TTransformed
-            >).transformer
-          }".`,
+        throw new UnrecognizedTransformerFactoryKindError(
+          (transformerFactory as common.DatumTransformerFactory<
+            TContext,
+            TDatum,
+            TTransformed
+          >).transformer,
         );
     }
   }
@@ -146,11 +143,17 @@ export class DataPipelineBuilder<TInput, TContext, TDatum> {
   //   });
   // }
 
-  public storeAsIs() {
-    return new pipeline.DataPipeline<TInput, TContext, TDatum, TDatum>(
-      this._factory,
-      undefined,
-    );
+  public storeToNowhere() {
+    return this.storeTo(() => {
+      return () => {
+        return {
+          storing: {
+            processor: () => {},
+            end: () => {},
+          },
+        };
+      };
+    });
   }
   public storeTo<TResult>(
     datumStoringFactory: () => common.DatumStoringFactory<
@@ -159,10 +162,7 @@ export class DataPipelineBuilder<TInput, TContext, TDatum> {
       TResult
     >,
   ) {
-    return new pipeline.DataPipeline<TInput, TContext, TDatum, TResult>(
-      this._factory,
-      datumStoringFactory,
-    );
+    return this._factory(datumStoringFactory);
   }
 
   public supplyInputFromInMemoryResultOf<
@@ -208,5 +208,11 @@ export class DataPipelineBuilder<TInput, TContext, TDatum> {
         };
       },
     );
+  }
+}
+
+export class UnrecognizedTransformerFactoryKindError extends Error {
+  public constructor(public readonly kind: string) {
+    super(`Unrecognized transformer factory kind "${kind}".`);
   }
 }

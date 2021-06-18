@@ -18,7 +18,7 @@
     "lint": "eslint ./src --ext .ts,.tsx",
     "watch": "tsc -w",
     "test": "nyc ava",
-    "remove-test-files": "rm -rf dist/*/tests src/*/tests dist/*/test-helpers src/*/test-helpers"
+    "remove-test-files": "rm -rf dist/*/tests src/*/tests dist/*/test-support src/*/test-support"
   },
   "dependencies": {
     "@data-heaving/common": "0.10.1"

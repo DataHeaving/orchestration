@@ -1,6 +1,5 @@
 import test from "ava";
 import * as helpers from "../helpers";
-import * as testHelpers from "../test-helpers";
 
 test("Splitting sink for array data source works as expected", async (t) => {
   const startArray = [0, 1];
@@ -11,8 +10,8 @@ test("Splitting sink for array data source works as expected", async (t) => {
   await helpers
     .from(
       helpers
-        .arrayDataSource(startArray)
-        .create<typeof startArray, typeof startArray>(() => endArray),
+        .arrayInputPassThroughSource<number>()
+        .withContextFactory(() => "Context"),
     )
     .transformEveryDatum<number>({
       transformer: "complex",
@@ -32,12 +31,8 @@ test("Splitting sink for array data source works as expected", async (t) => {
       },
     })
     .storeTo(
-      testHelpers.arrayDataSink(
-        (array) => Promise.resolve(array),
-        () => {},
-      ),
-    )
-    .finalizePipeline()(startArray);
+      helpers.arrayDataSink(endArray, undefined, () => Promise.resolve()),
+    )(startArray);
   t.deepEqual(startArray, endArray);
   t.deepEqual(startArray, transformerCalls);
   t.is(createCalls, 2);
