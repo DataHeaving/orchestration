@@ -43,7 +43,7 @@ test("Using transformations works as expected", async (t) => {
     )
     .transformEveryDatum({
       transformer: "complex",
-      factory: () => (next: common.DatumStoring<number>, ctx, recreate) => ({
+      factory: () => (next: common.DatumStoring<number>) => ({
         transformer: (item, controlFlow) => {
           next.processor(item + 1, controlFlow);
         },
