@@ -12,19 +12,15 @@ test("Job-specific event invoking works", async (t) => {
       job1: {
         job: () => common.sleep(100),
         timeFromNowToNextInvocation: timeFromNowToNextInvocation(1, 0), // Return value of 0 for 1 time, then undefined
-        jobSpecificEvents: createJobSpecificEventBuilderForTrackerObject(
-          job1Events,
-        ),
+        jobSpecificEvents: createEventBuilderForTrackerObject(job1Events),
       },
       job2: {
         job: () => common.sleep(100),
         timeFromNowToNextInvocation: timeFromNowToNextInvocation(1, 0), // Return value of 0 for 1 time, then undefined
-        jobSpecificEvents: createJobSpecificEventBuilderForTrackerObject(
-          job2Events,
-        ),
+        jobSpecificEvents: createEventBuilderForTrackerObject(job2Events),
       },
     },
-    createJobSpecificEventBuilderForTrackerObject(globalEvents),
+    createEventBuilderForTrackerObject(globalEvents),
   );
 
   t.deepEqual(
@@ -78,6 +74,66 @@ test("After error, previous value is undefined", async (t) => {
   t.deepEqual(seenResults, [undefined, 1, 2, undefined, 4]);
 });
 
+test("Test that specifying jobs as array works too", async (t) => {
+  let jobCalled = false;
+  function createJobInfo(): spec.JobInfo<unknown> {
+    return {
+      job: () => {
+        jobCalled = true;
+        return Promise.resolve();
+      },
+      timeFromNowToNextInvocation: timeFromNowToNextInvocation(1, 0), // Return value of 0 for 1 time, then undefined
+    };
+  }
+  await spec.runScheduler(["job"], createJobInfo());
+
+  t.true(jobCalled);
+  jobCalled = false;
+
+  let jobFactoryCalled = false;
+  let seenJobID = "";
+  let seenIdx = -1;
+  await spec.runScheduler(["job"], (jobID, idx) => {
+    jobFactoryCalled = true;
+    seenJobID = jobID;
+    seenIdx = idx;
+    return createJobInfo();
+  });
+
+  t.true(jobFactoryCalled);
+  t.deepEqual(seenJobID, "job");
+  t.deepEqual(seenIdx, 0);
+  t.true(jobCalled);
+});
+
+test("Passing duplicate job ID throws an expected error", (t) => {
+  let jobCalled = false;
+  t.throws(
+    () =>
+      spec.runScheduler(["jobID", "jobID"], {
+        job: () => {
+          jobCalled = true;
+          return Promise.resolve();
+        },
+        timeFromNowToNextInvocation: timeFromNowToNextInvocation(1, 0), // Return value of 0 for 1 time, then undefined
+      }),
+    {
+      instanceOf: spec.DuplicateJobIDError,
+      message: `Duplicate job ID "jobID".`,
+    },
+  );
+  t.false(jobCalled);
+});
+
+test("Passing invalid arguments throws an expected error", (t) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  t.throws(() => spec.runScheduler([], undefined as any), {
+    instanceOf: spec.InvalidParametersError,
+    message:
+      "When giving array as first argument, second argument must be function or job specification.",
+  });
+});
+
 function createEventsTrackerObject(): {
   [P in keyof events.VirtualSchedulerEvents]: number;
 } {
@@ -88,7 +144,7 @@ function createEventsTrackerObject(): {
   };
 }
 
-const createJobSpecificEventBuilderForTrackerObject = (
+const createEventBuilderForTrackerObject = (
   trackerObject: ReturnType<typeof createEventsTrackerObject>,
 ) => {
   const retVal = new common.EventEmitterBuilder<events.VirtualSchedulerEvents>();
