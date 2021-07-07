@@ -57,7 +57,7 @@ test("After error, previous value is undefined", async (t) => {
   const timeToNextRun = timeFromNowToNextInvocation(4, 0);
   const seenResults: Array<unknown> = [];
   await spec.runScheduler({
-    job: {
+    jobID: {
       job: () => {
         ++counter;
         if (counter === 3) {
@@ -106,9 +106,9 @@ test("Test that specifying jobs as array works too", async (t) => {
   t.true(jobCalled);
 });
 
-test("Passing duplicate job ID throws an expected error", (t) => {
+test("Passing duplicate job ID throws an expected error", async (t) => {
   let jobCalled = false;
-  t.throws(
+  await t.throwsAsync(
     () =>
       spec.runScheduler(["jobID", "jobID"], {
         job: () => {
@@ -125,13 +125,37 @@ test("Passing duplicate job ID throws an expected error", (t) => {
   t.false(jobCalled);
 });
 
-test("Passing invalid arguments throws an expected error", (t) => {
+test("Passing invalid arguments throws an expected error", async (t) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  t.throws(() => spec.runScheduler([], undefined as any), {
+  await t.throwsAsync(() => spec.runScheduler([], undefined as any), {
     instanceOf: spec.InvalidParametersError,
     message:
       "When giving array as first argument, second argument must be function or job specification.",
   });
+});
+
+test("Test that asynchronous job (factory) works", async (t) => {
+  let jobCalled = false;
+  const createJobInfoAsync = async () => {
+    await common.sleep(200);
+    return {
+      job: async () => {
+        await common.sleep(100);
+        jobCalled = true;
+      },
+      timeFromNowToNextInvocation: timeFromNowToNextInvocation(1, 0), // Return value of 0 for 1 time, then undefined
+    };
+  };
+  await spec.runScheduler({
+    job1: await createJobInfoAsync(),
+  });
+  t.true(jobCalled);
+
+  jobCalled = false;
+  await spec.runScheduler({
+    job1: createJobInfoAsync,
+  });
+  t.true(jobCalled);
 });
 
 function createEventsTrackerObject(): {
