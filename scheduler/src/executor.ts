@@ -14,34 +14,42 @@ export interface JobInfo<TResult> {
 export type SchedulerReturn = Promise<Array<unknown>>;
 
 export function runScheduler<TJobID extends string>(
-  jobs: Record<TJobID, common.ItemOrFactory<JobInfo<unknown>, [TJobID]>>,
+  jobs: Record<
+    TJobID,
+    common.ItemOrFactory<common.MaybePromise<JobInfo<unknown>>, [TJobID]>
+  >,
   eventBuilder?: events.SchedulerEventBuilder,
 ): SchedulerReturn;
 export function runScheduler<TJobID extends string>(
   jobIDs: ReadonlyArray<TJobID>,
-  jobSetup: common.ItemOrFactory<JobInfo<unknown>, [TJobID, number]>,
+  jobSetup: common.ItemOrFactory<
+    common.MaybePromise<JobInfo<unknown>>,
+    [TJobID, number]
+  >,
   eventBuilder?: events.SchedulerEventBuilder,
 ): SchedulerReturn;
 
-export function runScheduler<TJobID extends string>(
+export async function runScheduler<TJobID extends string>(
   jobsOrIDs:
-    | Record<TJobID, common.ItemOrFactory<JobInfo<unknown>, [TJobID]>>
+    | Record<
+        TJobID,
+        common.ItemOrFactory<common.MaybePromise<JobInfo<unknown>>, [TJobID]>
+      >
     | ReadonlyArray<TJobID>,
   jobSetupOrEventBuilder:
-    | common.ItemOrFactory<JobInfo<unknown>, [TJobID, number]>
+    | common.ItemOrFactory<
+        common.MaybePromise<JobInfo<unknown>>,
+        [TJobID, number]
+      >
     | (events.SchedulerEventBuilder | undefined),
-  eventBuilderOrshouldStop:
-    | events.SchedulerEventBuilder
-    | undefined = undefined,
+  eventBuilder: events.SchedulerEventBuilder | undefined = undefined,
 ): SchedulerReturn {
   const schedulerEvents =
-    (typeof eventBuilderOrshouldStop === "function"
-      ? undefined
-      : eventBuilderOrshouldStop) ??
+    eventBuilder ??
     (jobSetupOrEventBuilder instanceof common.EventEmitterBuilder
       ? jobSetupOrEventBuilder
       : events.createEventEmitterBuilder());
-  let jobs: Record<string, JobInfo<unknown>>;
+  let jobPromises: Record<string, common.MaybePromise<JobInfo<unknown>>>;
   if (Array.isArray(jobsOrIDs)) {
     if (
       jobSetupOrEventBuilder instanceof common.EventEmitterBuilder ||
@@ -51,31 +59,45 @@ export function runScheduler<TJobID extends string>(
         "When giving array as first argument, second argument must be function or job specification.",
       );
     }
-    jobs = jobsOrIDs.reduce<typeof jobs>((curJobs, jobID, idx) => {
-      if (jobID in curJobs) {
-        throw new DuplicateJobIDError(jobID);
-      }
-      curJobs[jobID] =
-        typeof jobSetupOrEventBuilder === "function"
-          ? jobSetupOrEventBuilder(
-              // getScopedEventBuilder(jobID),
-              jobID,
-              idx,
-            )
-          : jobSetupOrEventBuilder;
-      return curJobs;
-    }, {});
+    jobPromises = jobsOrIDs.reduce<typeof jobPromises>(
+      (curJobs, jobID, idx) => {
+        if (jobID in curJobs) {
+          throw new DuplicateJobIDError(jobID);
+        }
+        curJobs[jobID] =
+          typeof jobSetupOrEventBuilder === "function"
+            ? jobSetupOrEventBuilder(
+                // getScopedEventBuilder(jobID),
+                jobID,
+                idx,
+              )
+            : jobSetupOrEventBuilder;
+        return curJobs;
+      },
+      {},
+    );
   } else {
-    jobs = Object.entries<common.ItemOrFactory<JobInfo<unknown>, [TJobID]>>(
-      jobsOrIDs,
-    ).reduce<typeof jobs>((curJobs, [jobID, jobOrFactory]) => {
-      curJobs[jobID] =
-        typeof jobOrFactory === "function"
-          ? jobOrFactory(jobID as TJobID)
-          : jobOrFactory;
-      return curJobs;
-    }, {});
+    jobPromises = Object.entries<
+      common.ItemOrFactory<common.MaybePromise<JobInfo<unknown>>, [TJobID]>
+    >(jobsOrIDs).reduce<typeof jobPromises>(
+      (curJobs, [jobID, jobOrFactory]) => {
+        curJobs[jobID] =
+          typeof jobOrFactory === "function"
+            ? jobOrFactory(jobID as TJobID)
+            : jobOrFactory;
+        return curJobs;
+      },
+      {},
+    );
   }
+
+  const jobs = Object.fromEntries(
+    await Promise.all(
+      Object.entries(jobPromises).map(async ([jobID, maybePromise]) => {
+        return [jobID, await maybePromise] as const;
+      }),
+    ),
+  );
 
   const eventEmitter = Object.entries(jobs)
     .reduce((builder, [jobID, { jobSpecificEvents }]) => {
