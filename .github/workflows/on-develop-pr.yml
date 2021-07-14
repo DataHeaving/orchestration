@@ -13,6 +13,9 @@ on:
     - 'scheduler/**'
     - '!pipelines/README.md'
     - '!scheduler/README.md'
+  push: # Run this pipeline also after merging to develop, to report code coverage to codecov for this branch
+    branches:
+    - develop
 
 jobs:
   build_and_test:
@@ -24,7 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
         with:
-          # ref: refs/heads/develop
           fetch-depth: 0
       - uses: actions/setup-node@v2
         with:
@@ -39,3 +41,8 @@ jobs:
           npm ci
           npm run build
           npm run test
+      - uses: codecov/codecov-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: ${{ matrix.dir }}
+          directory: ${{ matrix.dir }}

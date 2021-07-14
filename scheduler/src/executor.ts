@@ -14,62 +14,90 @@ export interface JobInfo<TResult> {
 export type SchedulerReturn = Promise<Array<unknown>>;
 
 export function runScheduler<TJobID extends string>(
-  jobs: Record<TJobID, common.ItemOrFactory<JobInfo<unknown>, [TJobID]>>,
+  jobs: Record<
+    TJobID,
+    common.ItemOrFactory<common.MaybePromise<JobInfo<unknown>>, [TJobID]>
+  >,
   eventBuilder?: events.SchedulerEventBuilder,
 ): SchedulerReturn;
 export function runScheduler<TJobID extends string>(
   jobIDs: ReadonlyArray<TJobID>,
-  jobSetup: (jobID: TJobID, index: number) => JobInfo<unknown>,
+  jobSetup: common.ItemOrFactory<
+    common.MaybePromise<JobInfo<unknown>>,
+    [TJobID, number]
+  >,
   eventBuilder?: events.SchedulerEventBuilder,
 ): SchedulerReturn;
 
-export function runScheduler<TJobID extends string>(
+export async function runScheduler<TJobID extends string>(
   jobsOrIDs:
-    | Record<TJobID, common.ItemOrFactory<JobInfo<unknown>, [TJobID]>>
+    | Record<
+        TJobID,
+        common.ItemOrFactory<common.MaybePromise<JobInfo<unknown>>, [TJobID]>
+      >
     | ReadonlyArray<TJobID>,
   jobSetupOrEventBuilder:
-    | ((jobID: TJobID, index: number) => JobInfo<unknown>)
+    | common.ItemOrFactory<
+        common.MaybePromise<JobInfo<unknown>>,
+        [TJobID, number]
+      >
     | (events.SchedulerEventBuilder | undefined),
-  eventBuilderOrshouldStop:
-    | events.SchedulerEventBuilder
-    | undefined = undefined,
+  eventBuilder: events.SchedulerEventBuilder | undefined = undefined,
 ): SchedulerReturn {
   const schedulerEvents =
-    (typeof eventBuilderOrshouldStop === "function"
-      ? undefined
-      : eventBuilderOrshouldStop) ??
+    eventBuilder ??
     (jobSetupOrEventBuilder instanceof common.EventEmitterBuilder
       ? jobSetupOrEventBuilder
       : events.createEventEmitterBuilder());
-  let jobs: Record<string, JobInfo<unknown>>;
+  let jobPromises: Record<string, common.MaybePromise<JobInfo<unknown>>>;
   if (Array.isArray(jobsOrIDs)) {
-    if (typeof jobSetupOrEventBuilder !== "function") {
-      throw new Error(
-        "When giving array as first argument, second argument must be function.",
+    if (
+      jobSetupOrEventBuilder instanceof common.EventEmitterBuilder ||
+      jobSetupOrEventBuilder === undefined
+    ) {
+      throw new InvalidParametersError(
+        "When giving array as first argument, second argument must be function or job specification.",
       );
     }
-    jobs = jobsOrIDs.reduce<typeof jobs>((curJobs, jobID, idx) => {
-      if (jobID in curJobs) {
-        throw new Error(`Duplicate job ID ${jobID}`);
-      }
-      curJobs[jobID] = jobSetupOrEventBuilder(
-        // getScopedEventBuilder(jobID),
-        jobID,
-        idx,
-      );
-      return curJobs;
-    }, {});
+    jobPromises = jobsOrIDs.reduce<typeof jobPromises>(
+      (curJobs, jobID, idx) => {
+        if (jobID in curJobs) {
+          throw new DuplicateJobIDError(jobID);
+        }
+        curJobs[jobID] =
+          typeof jobSetupOrEventBuilder === "function"
+            ? jobSetupOrEventBuilder(
+                // getScopedEventBuilder(jobID),
+                jobID,
+                idx,
+              )
+            : jobSetupOrEventBuilder;
+        return curJobs;
+      },
+      {},
+    );
   } else {
-    jobs = Object.entries<common.ItemOrFactory<JobInfo<unknown>, [TJobID]>>(
-      jobsOrIDs,
-    ).reduce<typeof jobs>((curJobs, [jobID, jobOrFactory]) => {
-      curJobs[jobID] =
-        typeof jobOrFactory === "function"
-          ? jobOrFactory(jobID as TJobID)
-          : jobOrFactory;
-      return curJobs;
-    }, {});
+    jobPromises = Object.entries<
+      common.ItemOrFactory<common.MaybePromise<JobInfo<unknown>>, [TJobID]>
+    >(jobsOrIDs).reduce<typeof jobPromises>(
+      (curJobs, [jobID, jobOrFactory]) => {
+        curJobs[jobID] =
+          typeof jobOrFactory === "function"
+            ? jobOrFactory(jobID as TJobID)
+            : jobOrFactory;
+        return curJobs;
+      },
+      {},
+    );
   }
+
+  const jobs = Object.fromEntries(
+    await Promise.all(
+      Object.entries(jobPromises).map(async ([jobID, maybePromise]) => {
+        return [jobID, await maybePromise] as const;
+      }),
+    ),
+  );
 
   const eventEmitter = Object.entries(jobs)
     .reduce((builder, [jobID, { jobSpecificEvents }]) => {
@@ -79,13 +107,13 @@ export function runScheduler<TJobID extends string>(
             // Combine current event emitter with emitter scoped to this specific pipeline
             common.scopeEvents(jobSpecificEvents, {
               jobScheduled: {
-                name: jobID,
+                jobID: jobID,
               },
               jobStarting: {
-                name: jobID,
+                jobID: jobID,
               },
               jobEnded: {
-                name: jobID,
+                jobID: jobID,
               },
             }),
           )
@@ -104,14 +132,14 @@ export function runScheduler<TJobID extends string>(
     do {
       timeToStartInMs = timeFromNowToNextInvocation(prevResult);
       if (timeToStartInMs !== undefined && !isNaN(timeToStartInMs)) {
-        eventEmitter.emit("jobScheduled", { name, timeToStartInMs });
+        eventEmitter.emit("jobScheduled", { jobID: name, timeToStartInMs });
         const endedEvent: events.VirtualSchedulerEvents["jobEnded"] = {
-          name,
+          jobID: name,
           durationInMs: -1,
         };
         try {
           await common.sleep(timeToStartInMs);
-          eventEmitter.emit("jobStarting", { name });
+          eventEmitter.emit("jobStarting", { jobID: name });
           start = new Date();
           prevResult = await job();
         } catch (e) {
@@ -144,3 +172,11 @@ declare global {
     ): arg is ReadonlyArray<unknown>;
   }
 }
+
+export class DuplicateJobIDError extends Error {
+  public constructor(public readonly jobID: string) {
+    super(`Duplicate job ID "${jobID}".`);
+  }
+}
+
+export class InvalidParametersError extends Error {}
